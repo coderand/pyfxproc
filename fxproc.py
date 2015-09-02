@@ -1,4 +1,4 @@
-"""fxproc.py
+"""fxproc.py @ https://github.com/coderand/pyfxproc
 Direct3D .fx file interface for GPU based data processing.
 Created by Dmitry "AND" Andreev 2013-2015.
 License Creative Commons Zero v1.0 Universal.

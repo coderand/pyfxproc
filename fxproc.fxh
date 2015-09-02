@@ -1,4 +1,4 @@
-// fxproc.fxh
+// fxproc.fxh @ https://github.com/coderand/pyfxproc
 // Useful .fx helpers.
 // Created by Dmitry "AND" Andreev 2013-2015.
 // License Creative Commons Zero v1.0 Universal.
