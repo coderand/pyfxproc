@@ -4,7 +4,7 @@ Created by Dmitry "AND" Andreev 2013-2015.
 License Creative Commons Zero v1.0 Universal.
 """
 
-__version__ = '0.1.7'
+__version__ = '0.1.8'
 __all__ = ["Effect"]
 
 import os
@@ -62,6 +62,10 @@ D3DRTYPE_VOLUMETEXTURE = 4
 D3DRTYPE_CUBETEXTURE = 5
 D3DRTYPE_VERTEXBUFFER = 6
 D3DRTYPE_INDEXBUFFER = 7
+
+D3DQUERYTYPE_TIMESTAMP = 10
+D3DISSUE_END = (1 << 0)
+D3DGETDATA_FLUSH = (1 << 0)
 
 
 class D3DFORMAT :
@@ -239,6 +243,9 @@ IDirect3DDevice9_EndScene = WINFUNCTYPE(HRESULT)(42, "IDirect3DDevice9_EndScene"
 IDirect3DDevice9_Clear = WINFUNCTYPE(HRESULT, DWORD, LPVOID, DWORD, DWORD, FLOAT, DWORD)(43, "IDirect3DDevice9_Clear")
 IDirect3DDevice9_DrawPrimitiveUP = WINFUNCTYPE(HRESULT, UINT, UINT, LPVOID, UINT)(83, "IDirect3DDevice9_DrawPrimitiveUP")
 IDirect3DDevice9_SetFVF = WINFUNCTYPE(HRESULT, DWORD)(89, "IDirect3DDevice9_SetFVF")
+IDirect3DDevice9_CreateQuery = WINFUNCTYPE(HRESULT, DWORD, LPVOID)(118, "IDirect3DDevice9_CreateQuery")
+IDirect3DQuery9_Issue = WINFUNCTYPE(HRESULT, DWORD)(6, "IDirect3DQuery9_Issue")
+IDirect3DQuery9_GetData = WINFUNCTYPE(HRESULT, LPVOID, DWORD, DWORD)(7, "IDirect3DQuery9_GetData")
 Direct3DBaseTexture9_GetType = WINFUNCTYPE(DWORD)(10, "Direct3DBaseTexture9_GetType")
 Direct3DBaseTexture9_GetLevelCount = WINFUNCTYPE(DWORD)(13, "Direct3DBaseTexture9_GetLevelCount")
 IDirect3DTexture9_GetLevelDesc = WINFUNCTYPE(DWORD, UINT, LPVOID)(17, "IDirect3DTexture9_GetLevelDesc")
@@ -333,6 +340,12 @@ try:
 except:
 	raise Exception("Failed to create D3D device")
 
+lpFlushQuery = LPVOID(0)
+try:
+	IDirect3DDevice9_CreateQuery(lpDevice, D3DQUERYTYPE_TIMESTAMP, ctypes.byref(lpFlushQuery))
+except:
+	pass
+
 
 class Texture :
 
@@ -406,7 +419,7 @@ class Effect :
 - createRenderTargetCube ( size,          format_str, levels = 1 )
 - createVolumeTexture    ( width, height, format_str, levels = 1, slices = 1 )
 
-- loadTexture            ( file_name )
+- loadTexture            ( file_name, levels = 0 )
 - saveTexture            ( texture_or_render_target, file_name )
 
 - setRenderTarget        ( render_target, level = 0, face = 0 )
@@ -415,6 +428,7 @@ class Effect :
 - createTris             ( tri_count )
 - drawTris               ( tris, technique_name )
 - copyLevelToVolumeSlice ( source, destination_volume, slice )
+- flush                  ()
 
 - setFloat               ( name, x )
 - setFloat4              ( name, x, y, z, w )
@@ -482,7 +496,7 @@ class Effect :
 				print(text.rstrip())
 
 	@staticmethod
-	def loadTexture(file_name):
+	def loadTexture(file_name, levels=0):
 		texture = LPVOID(0)
 		info = D3DXIMAGE_INFO()
 
@@ -492,14 +506,14 @@ class Effect :
 			if info.ResourceType == D3DRTYPE_CUBETEXTURE:
 				D3DXCreateCubeTextureFromFileEx(
 					lpDevice, file_name, D3DX_DEFAULT_NONPOW2,
-					0, 0, info.Format, D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT,
+					int(levels), 0, info.Format, D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT,
 					0, NULL, NULL, ctypes.byref(texture)
 					)
 
 			elif info.ResourceType == D3DRTYPE_TEXTURE:
 				D3DXCreateTextureFromFileEx(
 					lpDevice, file_name, D3DX_DEFAULT_NONPOW2, D3DX_DEFAULT_NONPOW2,
-					0, 0, info.Format, D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT,
+					int(levels), 0, info.Format, D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT,
 					0, NULL, NULL, ctypes.byref(texture)
 					)
 
@@ -626,7 +640,7 @@ class Effect :
 		except WindowsError:
 			raise ValueError('Can\'t set technique "%s"' % (technique_name))
 
-	def drawQuad(self, technique_name):
+	def drawQuad(self, technique_name, do_flush=True):
 		x = -0.5
 		y = -0.5
 		w = Effect.curr_target_size[0]
@@ -654,11 +668,13 @@ class Effect :
 		ID3DXEffect_End(self.d3d_effect)
 		IDirect3DDevice9_EndScene(lpDevice)
 
+		if do_flush: self.flush()
+
 	@staticmethod
 	def createTris(tri_count):
 		return (TRI_VTX * tri_count)()
 
-	def drawTris(self, tri_list, technique_name): 
+	def drawTris(self, tri_list, technique_name, do_flush=True):
 		assert isinstance(tri_list, ctypes.Array) and TRI_VTX == tri_list._type_, "object %r is not an array of TRI_VTX" % (tri_list)
 
 		self.__beginScene(technique_name)
@@ -676,6 +692,16 @@ class Effect :
 
 		ID3DXEffect_End(self.d3d_effect)
 		IDirect3DDevice9_EndScene(lpDevice)
+
+		if do_flush: self.flush()
+
+	@staticmethod
+	def flush():
+		try:
+			IDirect3DQuery9_Issue(lpFlushQuery, D3DISSUE_END)
+			IDirect3DQuery9_GetData(lpFlushQuery, NULL, 0, D3DGETDATA_FLUSH)
+		except:
+			pass
 
 	def setFloat(self, name, x):
 		try:
@@ -708,6 +734,9 @@ def _cleanup():
 	for p in Texture.all_textures:
 		COM_Release(p)
 	Texture.all_textures = []
+
+	if lpFlushQuery:
+		COM_Release(lpFlushQuery)
 
 	ref = 0
 
