@@ -1,10 +1,10 @@
 """fxproc.py @ https://github.com/coderand/pyfxproc
 Direct3D .fx file interface for GPU based data processing.
-Created by Dmitry "AND" Andreev 2013-2015.
+Created by Dmitry "AND" Andreev 2013-2021.
 License Creative Commons Zero v1.0 Universal.
 """
 
-__version__ = '0.1.8'
+__version__ = '0.1.9'
 __all__ = ["Effect"]
 
 import os
@@ -14,13 +14,14 @@ import ctypes
 
 from ctypes import WINFUNCTYPE, Structure
 from ctypes.wintypes import *
-from ctypes.wintypes import HRESULT
+HRESULT = DWORD
 
 # Direct3D9 constants
 D3D_SDK_VERSION = 32
 D3DADAPTER_DEFAULT = 0
 D3DDEVTYPE_HAL = 1
 D3DDEVTYPE_REF = 2
+D3DCREATE_MULTITHREADED             = 0x00000004
 D3DCREATE_SOFTWARE_VERTEXPROCESSING = 0x00000020
 D3DCREATE_HARDWARE_VERTEXPROCESSING = 0x00000040
 D3DCREATE_MIXED_VERTEXPROCESSING    = 0x00000080
@@ -291,6 +292,7 @@ if d3dx9_43_warning :
 	print("WARNING: d3dx9_43.dll not found, falling back to lower version")
 
 Direct3DCreate9 = getattr(d3d9_dll, 'Direct3DCreate9')
+Direct3DCreate9.restype = LPVOID
 
 D3DXCreateEffectFromFile = getattr(d3dx9_43_dll, 'D3DXCreateEffectFromFileA')
 D3DXCreateEffectFromFile.argtypes = [LPVOID, LPCSTR, LPVOID, LPVOID, DWORD, LPVOID, LPVOID, LPVOID]
@@ -322,7 +324,7 @@ lpD3D9 = LPVOID(Direct3DCreate9(D3D_SDK_VERSION))
 if not lpD3D9:
 	raise Exception("Failed to create D3D")
 
-hWnd = CreateWindowEx(0, "STATIC", "fxproc_window", WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, 0, 0, 0, 0)
+hWnd = CreateWindowEx(0, "STATIC".encode("ascii"), "fxproc_window".encode("ascii"), WS_OVERLAPPEDWINDOW, 0, 0, 100, 100, 0, 0, 0, 0)
 
 if hWnd == 0:
 	raise Exception("Failed to create window")
@@ -332,7 +334,7 @@ lpDevice = LPVOID(0)
 d3dpp = D3DPRESENT_PARAMETERS(Windowed=1, SwapEffect=D3DSWAPEFFECT_DISCARD)
 
 try:
-	D3D9_CreateDevice(lpD3D9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, ctypes.byref(d3dpp), ctypes.byref(lpDevice))
+	D3D9_CreateDevice(lpD3D9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_MULTITHREADED | D3DCREATE_HARDWARE_VERTEXPROCESSING, ctypes.byref(d3dpp), ctypes.byref(lpDevice))
 
 	#:TODO: Try different configurations when one fails
 	#D3D9_CreateDevice(lpD3D9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, ctypes.byref(d3dpp), ctypes.byref(lpDevice))
@@ -372,6 +374,7 @@ class Texture :
 			slices = volume_desc.Depth
 			desc.Width = volume_desc.Width
 			desc.Height = volume_desc.Height
+			desc.Format = volume_desc.Format
 
 		else:
 			raise TypeError("Unknown resource type")
@@ -437,6 +440,7 @@ class Effect :
 
 	all_effects = []
 	curr_target_size = (0, 0)
+	begin_called = False
 
 	def __init__(self, d3d_effect, name = ""):
 		assert(d3d_effect)
@@ -457,7 +461,7 @@ class Effect :
 
 		try:
 			D3DXCreateEffectFromFile(
-				lpDevice, fx_name, NULL, NULL,
+				lpDevice, fx_name.encode('ascii'), NULL, NULL,
 				D3DXFX_NOT_CLONEABLE | D3DXSHADER_SKIPOPTIMIZATION, NULL,
 				ctypes.byref(d3d_effect), ctypes.byref(errors)
 				)
@@ -474,7 +478,7 @@ class Effect :
 
 		try:
 			D3DXCreateEffect(
-				lpDevice, text, len(text), NULL, NULL,
+				lpDevice, text.encode('ascii'), len(text), NULL, NULL,
 				D3DXFX_NOT_CLONEABLE | D3DXSHADER_SKIPOPTIMIZATION, NULL,
 				ctypes.byref(d3d_effect), ctypes.byref(errors)
 				)
@@ -501,18 +505,18 @@ class Effect :
 		info = D3DXIMAGE_INFO()
 
 		try:
-			D3DXGetImageInfoFromFile(file_name, ctypes.byref(info))
+			D3DXGetImageInfoFromFile(file_name.encode('ascii'), ctypes.byref(info))
 
 			if info.ResourceType == D3DRTYPE_CUBETEXTURE:
 				D3DXCreateCubeTextureFromFileEx(
-					lpDevice, file_name, D3DX_DEFAULT_NONPOW2,
+					lpDevice, file_name.encode('ascii'), D3DX_DEFAULT_NONPOW2,
 					int(levels), 0, info.Format, D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT,
 					0, NULL, NULL, ctypes.byref(texture)
 					)
 
 			elif info.ResourceType == D3DRTYPE_TEXTURE:
 				D3DXCreateTextureFromFileEx(
-					lpDevice, file_name, D3DX_DEFAULT_NONPOW2, D3DX_DEFAULT_NONPOW2,
+					lpDevice, file_name.encode('ascii'), D3DX_DEFAULT_NONPOW2, D3DX_DEFAULT_NONPOW2,
 					int(levels), 0, info.Format, D3DPOOL_MANAGED, D3DX_DEFAULT, D3DX_DEFAULT,
 					0, NULL, NULL, ctypes.byref(texture)
 					)
@@ -536,7 +540,7 @@ class Effect :
 		format = D3DXIMAGE_FILEFORMAT.by_str[ext]
 
 		try:
-			D3DXSaveTextureToFile(file_name, format, pyobj.d3d_texture, NULL)
+			D3DXSaveTextureToFile(file_name.encode('ascii'), format, pyobj.d3d_texture, NULL)
 		except:
 			raise IOError("Can't save texture " '"%s"' % (file_name))
 
@@ -627,16 +631,18 @@ class Effect :
 		w = Effect.curr_target_size[0]
 		h = Effect.curr_target_size[1]
 
-		IDirect3DDevice9_BeginScene(lpDevice)
+		if not Effect.begin_called:
+			IDirect3DDevice9_BeginScene(lpDevice)
+			Effect.begin_called = True
 
 		vec = D3DXVECTOR4(w, h, 1.0 / w, 1.0 / h)
 		try:
-			ID3DXEffect_SetVector(self.d3d_effect, "vTargetSize", ctypes.byref(vec))
+			ID3DXEffect_SetVector(self.d3d_effect, b"vTargetSize", ctypes.byref(vec))
 		except:
 			pass
 
 		try:
-			ID3DXEffect_SetTechnique(self.d3d_effect, technique_name)
+			ID3DXEffect_SetTechnique(self.d3d_effect, technique_name.encode('ascii'))
 		except WindowsError:
 			raise ValueError('Can\'t set technique "%s"' % (technique_name))
 
@@ -666,9 +672,11 @@ class Effect :
 			ID3DXEffect_EndPass(self.d3d_effect)
 
 		ID3DXEffect_End(self.d3d_effect)
-		IDirect3DDevice9_EndScene(lpDevice)
 
-		if do_flush: self.flush()
+		if do_flush:
+			IDirect3DDevice9_EndScene(lpDevice)
+			Effect.begin_called = False
+			self.flush()
 
 	@staticmethod
 	def createTris(tri_count):
@@ -691,9 +699,11 @@ class Effect :
 			ID3DXEffect_EndPass(self.d3d_effect)
 
 		ID3DXEffect_End(self.d3d_effect)
-		IDirect3DDevice9_EndScene(lpDevice)
 
-		if do_flush: self.flush()
+		if do_flush:
+			IDirect3DDevice9_EndScene(lpDevice)
+			Effect.begin_called = False
+			self.flush()
 
 	@staticmethod
 	def flush():
@@ -705,7 +715,7 @@ class Effect :
 
 	def setFloat(self, name, x):
 		try:
-			ID3DXEffect_SetFloat(self.d3d_effect, name, x)
+			ID3DXEffect_SetFloat(self.d3d_effect, name.encode('ascii'), x)
 		except WindowsError:
 			raise ValueError('Can\'t set float "%s"' % (name))
 
@@ -713,7 +723,7 @@ class Effect :
 		vec = D3DXVECTOR4(x, y, z, w)
 
 		try:
-			ID3DXEffect_SetVector(self.d3d_effect, name, ctypes.byref(vec))
+			ID3DXEffect_SetVector(self.d3d_effect, name.encode('ascii'), ctypes.byref(vec))
 		except WindowsError:
 			raise ValueError('Can\'t set vector "%s"' % (name))
 
@@ -721,7 +731,7 @@ class Effect :
 		Texture.check_type_of(pyobj)
 
 		try:
-			ID3DXEffect_SetTexture(self.d3d_effect, name, pyobj.d3d_texture)
+			ID3DXEffect_SetTexture(self.d3d_effect, name.encode('ascii'), pyobj.d3d_texture)
 		except WindowsError:
 			raise ValueError('Can\'t set texture "%s"' % (name))
 
